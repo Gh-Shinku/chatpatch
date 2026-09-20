@@ -20,6 +20,7 @@ class ElementStub {
     this.parentElement = null;
     this.parentNode = null;
     this.listeners = {};
+    this.style = {};
     this._textContent = attributes.textContent || "";
 
     for (const child of children) {
@@ -130,6 +131,19 @@ class ElementStub {
 
     if (selector === '[data-client-katex-layout][data-math-source]') {
       return Boolean(this.getAttribute("data-math-source"));
+    }
+
+    const tagAttributeMatch = selector.match(/^([a-z][\w-]*)\[([\w-]+)="([^"]+)"\]$/i);
+    if (tagAttributeMatch) {
+      return (
+        this.tagName.toLowerCase() === tagAttributeMatch[1].toLowerCase() &&
+        this.getAttribute(tagAttributeMatch[2]) === tagAttributeMatch[3]
+      );
+    }
+
+    const attributePresenceMatch = selector.match(/^\[([^=\]]+)\]$/);
+    if (attributePresenceMatch) {
+      return Boolean(this.getAttribute(attributePresenceMatch[1]));
     }
 
     const attributeMatch = selector.match(/^\[([^=]+)="([^"]+)"\]$/);
@@ -296,6 +310,91 @@ function misplacedResponseCopyButton() {
   ]);
 }
 
+function newAssistantExchange(children, options = {}) {
+  const {
+    nativeCopyLabel = "Copy",
+    withNativeCopy = true,
+    includeCodeCopyButton = false
+  } = options;
+
+  const messageChildren = includeCodeCopyButton
+    ? children.concat([
+        el("pre", {}, [
+          el("div", { className: "flex items-center justify-between" }, [
+            el("button", { "aria-label": "Copy", type: "button" })
+          ]),
+          el("code", {}, [text("x = 1")])
+        ])
+      ])
+    : children;
+
+  const userBlock = el("div", { className: "block-BQZwFn" }, [
+    el("h4", { className: "sr-only m-0 select-none" }, [text("You said:")]),
+    el("div", { className: "flex flex-col items-end gap-2" }, [
+      el("div", { "data-content-search-unit-key": "turn-1:0:user", className: "w-full" }, [
+        el("div", { className: "flex flex-row-reverse items-center gap-1" }, [
+          el("div", { className: "flex turn-action-controls items-center gap-0.5" }, [
+            el("span", { className: "contents" }, [
+              el("button", { "aria-label": "Copy message", type: "button" })
+            ])
+          ])
+        ])
+      ])
+    ])
+  ]);
+
+  const assistantBlock = el("div", { className: "block-BQZwFn" }, [
+    el("span", { "data-chatgpt-agent-turn-start": "", hidden: "" }),
+    el("div", { "data-content-search-unit-key": "turn-1:2:assistant" }, [
+      el("h4", { className: "sr-only m-0 select-none" }, [text("ChatGPT said:")]),
+      el("div", { className: "group flex min-w-0 flex-col" }, [
+        el(
+          "div",
+          {
+            "data-markdown-text-style": "assistant-message",
+            className: "MarkdownRoot-rZKhxa"
+          },
+          messageChildren
+        )
+      ])
+    ])
+  ]);
+
+  const actionButtons = [
+    el("span", { className: "contents" }, [
+      el("button", { "aria-label": "Rate response", type: "button" })
+    ])
+  ];
+  if (withNativeCopy) {
+    actionButtons.unshift(
+      el("span", { className: "contents" }, [
+        el("button", { "aria-label": nativeCopyLabel, type: "button" })
+      ])
+    );
+  }
+
+  const turnBody = el("div", { className: "group flex flex-col pb-2 pt-2" }, [
+    el("div", { className: "flex flex-col gap-3 browser:gap-1" }, [userBlock, assistantBlock]),
+    el("div", { className: "mt-1.5 flex turn-action-controls h-5 items-center gap-0.5" }, [
+      el("div", { className: "flex h-full items-center gap-0.5" }, actionButtons)
+    ])
+  ]);
+
+  return el("div", { "data-turn-key": "turn-1" }, [
+    el("div", { "data-content-search-turn-key": "turn-1", className: "flex flex-col gap-1.5" }, [
+      el("div", { className: "contents" }, [
+        el("div", { className: "contents" }, [turnBody])
+      ])
+    ])
+  ]);
+}
+
+function newAssistantNativeCopyButton(exchange) {
+  const turnBody = exchange.children[0].children[0].children[0].children[0];
+  const actionBar = turnBody.children[1];
+  return actionBar.children[0].children[0].children[0];
+}
+
 function inlineFormula(latex) {
   return el("span", { className: "katex" }, [
     el("span", { className: "katex-mathml" }, [
@@ -420,6 +519,107 @@ test("response copy button calls handler without clicking the native button", ()
 
   assert.equal(calledWith, nativeButton);
   assert.equal(nativeClicked, false);
+});
+
+test("injects response copy buttons next to the latest ChatGPT native copy button", () => {
+  const exchange = newAssistantExchange([el("p", {}, [text("Assistant")])]);
+  const root = new ElementStub("main", {}, [exchange]);
+
+  assert.equal(injectResponseCopyButtons(root, () => {}), 1);
+  assert.equal(root.querySelectorAll(`[${COPYTEX_RESPONSE_COPY_ATTRIBUTE}="true"]`).length, 1);
+
+  const buttons = root.querySelectorAll("button");
+  const nativeCopyButton = buttons.find(
+    (button) => button.getAttribute("aria-label") === "Copy"
+  );
+  const copyTeXButton = buttons.find(
+    (button) => button.getAttribute(COPYTEX_RESPONSE_COPY_ATTRIBUTE) === "true"
+  );
+  assert.equal(nativeCopyButton, newAssistantNativeCopyButton(exchange));
+  assert.equal(copyTeXButton.parentElement, nativeCopyButton.parentElement);
+  assert.equal(copyTeXButton.parentElement.children[0], nativeCopyButton);
+  assert.equal(copyTeXButton.getAttribute("data-testid"), "");
+  assert.equal(copyTeXButton.getAttribute("aria-label"), "Copy message with CopyTeX");
+  assert.match(copyTeXButton.innerHTML, /TeX/);
+
+  const userCopyButton = buttons.find(
+    (button) => button.getAttribute("aria-label") === "Copy message"
+  );
+  assert.equal(userCopyButton.getAttribute(COPYTEX_RESPONSE_COPY_ATTRIBUTE), "");
+  assert.equal(userCopyButton.children.length, 0);
+});
+
+test("does not duplicate response copy buttons in the latest ChatGPT DOM", () => {
+  const exchange = newAssistantExchange([el("p", {}, [text("Assistant")])]);
+  const root = new ElementStub("main", {}, [exchange]);
+
+  assert.equal(injectResponseCopyButtons(root, () => {}), 1);
+  assert.equal(injectResponseCopyButtons(root, () => {}), 0);
+  assert.equal(root.querySelectorAll(`[${COPYTEX_RESPONSE_COPY_ATTRIBUTE}="true"]`).length, 1);
+});
+
+test("ignores ChatGPT code block copy buttons when injecting", () => {
+  const exchange = newAssistantExchange([el("p", {}, [text("Assistant")])], {
+    includeCodeCopyButton: true
+  });
+  const root = new ElementStub("main", {}, [exchange]);
+
+  assert.equal(injectResponseCopyButtons(root, () => {}), 1);
+
+  const copyButtons = root
+    .querySelectorAll("button")
+    .filter((button) => button.getAttribute("aria-label") === "Copy");
+  assert.equal(copyButtons.length, 2);
+  assert.equal(
+    Boolean(copyButtons[0].closest('[data-markdown-text-style="assistant-message"]')),
+    true
+  );
+  assert.equal(copyButtons[0].getAttribute(COPYTEX_RESPONSE_COPY_ATTRIBUTE), "");
+
+  const copyTeXButton = root.querySelectorAll(
+    `[${COPYTEX_RESPONSE_COPY_ATTRIBUTE}="true"]`
+  )[0];
+  assert.equal(copyTeXButton.parentElement.children[0], copyButtons[1]);
+  assert.equal(copyTeXButton.parentElement.children.length, 2);
+});
+
+test("waits for the latest ChatGPT native copy button before injecting", () => {
+  const exchange = newAssistantExchange([el("p", {}, [text("Assistant")])], {
+    withNativeCopy: false
+  });
+  const root = new ElementStub("main", {}, [exchange]);
+
+  assert.equal(injectResponseCopyButtons(root, () => {}), 0);
+  assert.equal(root.querySelectorAll(`[${COPYTEX_RESPONSE_COPY_ATTRIBUTE}="true"]`).length, 0);
+});
+
+test("matches the injected button size to the latest ChatGPT native button", () => {
+  const exchange = newAssistantExchange([el("p", {}, [text("Assistant")])]);
+  const root = new ElementStub("main", {}, [exchange]);
+  const nativeCopyButton = newAssistantNativeCopyButton(exchange);
+  nativeCopyButton.getBoundingClientRect = () => ({ width: 20, height: 20 });
+
+  assert.equal(injectResponseCopyButtons(root, () => {}), 1);
+
+  const copyTeXButton = root.querySelectorAll(
+    `[${COPYTEX_RESPONSE_COPY_ATTRIBUTE}="true"]`
+  )[0];
+  assert.equal(copyTeXButton.style.minWidth, "20px");
+  assert.equal(copyTeXButton.style.height, "20px");
+});
+
+test("serializes the latest ChatGPT assistant message DOM", () => {
+  const exchange = newAssistantExchange([
+    el("p", {}, [text("Inline "), inlineFormula("E = mc^2"), text(".")]),
+    displayFormula("\\int_0^1 x\\,dx")
+  ]);
+
+  const result = serializeChatGptTurnToMarkdown(exchange, extractor, selectionSerializer);
+
+  assert.deepEqual(result, {
+    ok: true,
+    text: "Inline $E = mc^2$.\n\n$$\n\\int_0^1 x\\,dx\n$$"
+  });
 });
 
 test("serializes common ChatGPT Markdown DOM", () => {

@@ -1,13 +1,30 @@
 import type { FormatOptions, FormulaExtractionResult } from "./shared/types";
 import { serializeMarkdownChildren } from "./markdown";
 
-export const ASSISTANT_TURN_SELECTOR =
-  'section[data-testid^="conversation-turn-"]';
+// Current ChatGPT DOM (2026-09 redesign). Each exchange lives in a
+// [data-turn-key] wrapper, the assistant Markdown root is tagged with
+// data-markdown-text-style="assistant-message" and the native copy action is a
+// button labelled "Copy" inside the turn action bar.
+export const ASSISTANT_TURN_SELECTOR = "[data-turn-key]";
 export const ASSISTANT_MARKDOWN_SELECTOR =
-  '[data-message-author-role="assistant"] .markdown';
-export const NATIVE_COPY_SELECTOR = 'button[data-testid="copy-turn-action-button"]';
-const ASSISTANT_MESSAGE_SELECTOR = '[data-message-author-role="assistant"]';
+  '[data-markdown-text-style="assistant-message"]';
+export const NATIVE_COPY_SELECTOR = 'button[aria-label="Copy"]';
 export const COPYTEX_RESPONSE_COPY_ATTRIBUTE = "data-copytex-response-copy";
+
+// Legacy ChatGPT DOM, kept as a fallback for older or A/B-tested markup.
+const LEGACY_ASSISTANT_TURN_SELECTOR = 'section[data-testid^="conversation-turn-"]';
+const LEGACY_ASSISTANT_MARKDOWN_SELECTOR =
+  '[data-message-author-role="assistant"] .markdown';
+const LEGACY_ASSISTANT_MESSAGE_SELECTOR = '[data-message-author-role="assistant"]';
+const LEGACY_NATIVE_COPY_SELECTOR = 'button[data-testid="copy-turn-action-button"]';
+const LEGACY_NATIVE_COPY_ARIA_SELECTOR = 'button[aria-label="Copy response"]';
+
+const NATIVE_COPY_SELECTORS = [
+  LEGACY_NATIVE_COPY_SELECTOR,
+  LEGACY_NATIVE_COPY_ARIA_SELECTOR,
+  NATIVE_COPY_SELECTOR
+];
+
 const COPYTEX_NATIVE_INJECTED_ATTRIBUTE = "data-copytex-response-copy-injected";
 const ELEMENT_NODE = 1;
 
@@ -18,6 +35,11 @@ interface ExtractorApi {
 
 interface FormulaFormatter {
   formatFormula(extracted: FormulaExtractionResult, options?: FormatOptions): string;
+}
+
+interface AssistantCopyTarget {
+  turn: Element;
+  nativeButton: Element;
 }
 
 export interface ChatGptApi {
@@ -51,13 +73,8 @@ export function injectResponseCopyButtons(
   }
 
   let count = 0;
-  const turns = querySelectorAllWithSelf(root, ASSISTANT_TURN_SELECTOR).filter(isAssistantTurn);
-  for (const turn of turns) {
-    const nativeButton = findNativeCopyButton(turn);
-    if (!nativeButton) {
-      continue;
-    }
-
+  for (const target of collectAssistantCopyTargets(root)) {
+    const { turn, nativeButton } = target;
     const existingButton = findResponseCopyButton(turn);
     if (existingButton) {
       if (isInsertedAfterNativeButton(existingButton, nativeButton)) {
@@ -79,6 +96,67 @@ export function injectResponseCopyButtons(
   return count;
 }
 
+function collectAssistantCopyTargets(root: ParentNode): AssistantCopyTarget[] {
+  const targets: AssistantCopyTarget[] = [];
+  const seenNativeButtons = new Set<Element>();
+
+  // Current DOM: pair every assistant message with the native copy button that
+  // ChatGPT renders in the action bar of the same turn.
+  for (const messageRoot of querySelectorAll(root, ASSISTANT_MARKDOWN_SELECTOR)) {
+    const target = findAssistantCopyTarget(messageRoot);
+    if (target && !seenNativeButtons.has(target.nativeButton)) {
+      seenNativeButtons.add(target.nativeButton);
+      targets.push(target);
+    }
+  }
+
+  // Legacy DOM: assistant turns are sections holding an assistant message.
+  for (const turn of querySelectorAllWithSelf(root, LEGACY_ASSISTANT_TURN_SELECTOR).filter(
+    isAssistantTurn
+  )) {
+    const messageRoot = querySelector(turn, LEGACY_ASSISTANT_MARKDOWN_SELECTOR);
+    const nativeButton = findNativeCopyButton(turn, messageRoot);
+    if (!nativeButton || seenNativeButtons.has(nativeButton)) {
+      continue;
+    }
+
+    seenNativeButtons.add(nativeButton);
+    targets.push({ turn, nativeButton });
+  }
+
+  return targets;
+}
+
+function findAssistantCopyTarget(messageRoot: Element): AssistantCopyTarget | null {
+  const boundary = closest(messageRoot, ASSISTANT_TURN_SELECTOR);
+  let cursor = parentElement(messageRoot);
+
+  while (cursor) {
+    const nativeButton = findNativeCopyButton(cursor, messageRoot);
+    if (nativeButton) {
+      return { turn: cursor, nativeButton };
+    }
+
+    if (cursor === boundary || containsAssistantMessage(cursor, messageRoot)) {
+      break;
+    }
+
+    cursor = parentElement(cursor);
+  }
+
+  return null;
+}
+
+function containsAssistantMessage(scope: Element, messageRoot: Element): boolean {
+  for (const candidate of querySelectorAll(scope, ASSISTANT_MARKDOWN_SELECTOR)) {
+    if (candidate !== messageRoot) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function createResponseCopyButton(
   nativeButton: Element,
   turn: Element,
@@ -97,6 +175,7 @@ function createResponseCopyButton(
   button.setAttribute("title", "Copy message with CopyTeX");
   button.innerHTML =
     '<span class="copytex-response-copy-label flex items-center justify-center touch:w-10 h-8 w-8">TeX</span>';
+  matchNativeButtonSize(button, nativeButton);
 
   button.addEventListener("click", (event) => {
     event.preventDefault();
@@ -108,6 +187,55 @@ function createResponseCopyButton(
   });
 
   return button;
+}
+
+// ChatGPT action bars changed from 32px buttons to compact 20px ones, so size
+// the injected button after the native one instead of hard coding it.
+function matchNativeButtonSize(button: Element, nativeButton: Element): void {
+  const size = measureElementSize(nativeButton);
+  if (!size) {
+    return;
+  }
+
+  setElementSize(button, size);
+  const label = firstElementChild(button);
+  if (label) {
+    setElementSize(label, size);
+    setInlineStyle(label, "lineHeight", `${size}px`);
+  }
+}
+
+function measureElementSize(element: Element): number {
+  const measure = (element as {
+    getBoundingClientRect?: () => { width?: number; height?: number };
+  }).getBoundingClientRect;
+  if (typeof measure !== "function") {
+    return 0;
+  }
+
+  const rect = measure.call(element);
+  const width = Number(rect && rect.width) || 0;
+  const height = Number(rect && rect.height) || 0;
+  const size = Math.max(width, height);
+
+  return size > 0 ? Math.round(size) : 0;
+}
+
+function setElementSize(element: Element, size: number): void {
+  setInlineStyle(element, "minWidth", `${size}px`);
+  setInlineStyle(element, "height", `${size}px`);
+}
+
+function setInlineStyle(element: Element, property: string, value: string): void {
+  const style = (element as { style?: Record<string, string> }).style;
+  if (style) {
+    style[property] = value;
+  }
+}
+
+function firstElementChild(element: Element): Element | null {
+  const children = (element as { children?: ArrayLike<Element> }).children;
+  return children && children.length ? children[0] : null;
 }
 
 export function serializeChatGptTurnToMarkdown(
@@ -128,8 +256,17 @@ export function serializeChatGptTurnToMarkdown(
     : { ok: false, text: "", error: "No response content found" };
 }
 
-function findNativeCopyButton(turn: ParentNode): Element | null {
-  return querySelector(turn, NATIVE_COPY_SELECTOR);
+function findNativeCopyButton(scope: ParentNode, exclude?: Element | null): Element | null {  for (const selector of NATIVE_COPY_SELECTORS) {
+    for (const candidate of querySelectorAll(scope, selector)) {
+      if (exclude && containsElement(exclude, candidate)) {
+        continue;
+      }
+
+      return candidate;
+    }
+  }
+
+  return null;
 }
 
 function findResponseCopyButton(turn: ParentNode): Element | null {
@@ -163,6 +300,27 @@ function previousElementSibling(element: Element): Element | null {
   return index > 0 ? siblings[index - 1] : null;
 }
 
+function parentElement(element: Element): Element | null {
+  return (element as { parentElement?: Element | null }).parentElement || null;
+}
+
+function containsElement(parent: Element, child: Element): boolean {
+  if (typeof parent.contains === "function") {
+    return parent.contains(child);
+  }
+
+  let cursor: Element | null = child;
+  while (cursor) {
+    if (cursor === parent) {
+      return true;
+    }
+
+    cursor = parentElement(cursor);
+  }
+
+  return false;
+}
+
 function removeElement(element: Element): void {
   if (typeof element.remove === "function") {
     element.remove();
@@ -177,14 +335,15 @@ function removeElement(element: Element): void {
 
 function findChatGptAssistantTurn(element: unknown): Element | null {
   const turn = closest(element, ASSISTANT_TURN_SELECTOR);
-  return isAssistantTurn(turn) ? turn : null;
+  return isElementLike(turn) ? turn : null;
 }
 
 function findChatGptMessageRoot(turn: ParentNode): Element | null {
   return (
     querySelector(turn, ASSISTANT_MARKDOWN_SELECTOR) ||
+    querySelector(turn, LEGACY_ASSISTANT_MARKDOWN_SELECTOR) ||
     querySelector(turn, ".markdown") ||
-    querySelector(turn, ASSISTANT_MESSAGE_SELECTOR)
+    querySelector(turn, LEGACY_ASSISTANT_MESSAGE_SELECTOR)
   );
 }
 
@@ -201,7 +360,7 @@ function isAssistantTurn(turn: unknown): turn is Element {
     return true;
   }
 
-  return Boolean(querySelector(turn, ASSISTANT_MESSAGE_SELECTOR));
+  return Boolean(querySelector(turn, LEGACY_ASSISTANT_MESSAGE_SELECTOR));
 }
 
 function closest(element: unknown, selector: string): Element | null {
@@ -215,36 +374,13 @@ function closest(element: unknown, selector: string): Element | null {
 
   let cursor = isNodeLike(element) ? element : null;
   while (cursor) {
-    if (matches(cursor, selector)) {
+    if (matchesSelector(cursor, selector)) {
       return cursor as Element;
     }
     cursor = cursor.parentElement || cursor.parentNode || null;
   }
 
   return null;
-}
-
-function matches(element: unknown, selector: string): boolean {
-  if (!element) {
-    return false;
-  }
-
-  if (isElementLike(element) && typeof element.matches === "function") {
-    return element.matches(selector);
-  }
-
-  if (selector === ASSISTANT_TURN_SELECTOR) {
-    return (
-      tagName(element) === "section" &&
-      String(getAttribute(element, "data-testid")).startsWith("conversation-turn-")
-    );
-  }
-
-  if (selector === ASSISTANT_MESSAGE_SELECTOR) {
-    return getAttribute(element, "data-message-author-role") === "assistant";
-  }
-
-  return false;
 }
 
 function getAttribute(element: unknown, name: string): string {
@@ -290,19 +426,39 @@ function matchesSelector(node: Node, selector: string): node is Element {
     return node.matches(selector);
   }
 
+  if (selector === ASSISTANT_TURN_SELECTOR) {
+    return getAttribute(node, "data-turn-key") !== "";
+  }
+
   if (selector === ASSISTANT_MARKDOWN_SELECTOR) {
-    return hasClass(node, "markdown") && Boolean(closest(node, ASSISTANT_MESSAGE_SELECTOR));
+    return getAttribute(node, "data-markdown-text-style") === "assistant-message";
   }
 
   if (selector === NATIVE_COPY_SELECTOR) {
+    return isCopyActionButton(node, "Copy");
+  }
+
+  if (selector === LEGACY_NATIVE_COPY_SELECTOR) {
     return tagName(node) === "button" && getAttribute(node, "data-testid") === "copy-turn-action-button";
   }
 
-  if (selector === ASSISTANT_TURN_SELECTOR) {
+  if (selector === LEGACY_NATIVE_COPY_ARIA_SELECTOR) {
+    return isCopyActionButton(node, "Copy response");
+  }
+
+  if (selector === LEGACY_ASSISTANT_TURN_SELECTOR) {
     return (
       tagName(node) === "section" &&
       String(getAttribute(node, "data-testid")).startsWith("conversation-turn-")
     );
+  }
+
+  if (selector === LEGACY_ASSISTANT_MARKDOWN_SELECTOR) {
+    return hasClass(node, "markdown") && Boolean(closest(node, LEGACY_ASSISTANT_MESSAGE_SELECTOR));
+  }
+
+  if (selector === LEGACY_ASSISTANT_MESSAGE_SELECTOR) {
+    return getAttribute(node, "data-message-author-role") === "assistant";
   }
 
   if (selector === `[${COPYTEX_RESPONSE_COPY_ATTRIBUTE}="true"]`) {
@@ -313,15 +469,15 @@ function matchesSelector(node: Node, selector: string): node is Element {
     return tagName(node) === selector;
   }
 
-  if (selector === ASSISTANT_MESSAGE_SELECTOR) {
-    return getAttribute(node, "data-message-author-role") === "assistant";
-  }
-
   if (selector.startsWith(".")) {
     return hasClass(node, selector.slice(1));
   }
 
   return false;
+}
+
+function isCopyActionButton(node: Element, label: string): boolean {
+  return tagName(node) === "button" && getAttribute(node, "aria-label") === label;
 }
 
 function walk(root: unknown, visit: (node: Node) => void): void {
