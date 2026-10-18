@@ -5,6 +5,9 @@ const TRACKING_SOURCES = new Map([
 const ASSISTANT_SELECTOR =
   '[data-markdown-text-style="assistant-message"], [data-message-author-role="assistant"]';
 const EDITABLE_SELECTOR = 'input, textarea, [contenteditable]:not([contenteditable="false"])';
+const USER_SELECTOR = '[data-message-author-role="user"], [data-turn="user"]';
+const PREVIEW_SELECTOR =
+  '[data-radix-popper-content-wrapper], [data-radix-portal], [role="tooltip"], [role="dialog"]';
 const controllers = new WeakMap<Document, () => void>();
 
 export function cleanChatGptLink(href: string): string {
@@ -60,9 +63,15 @@ export function initChatGptLinkCleanup(document: Document, hostname: string): ()
   let active = true;
   let scheduled = false;
   const pending = new Set<Element>();
+  const cleanedTargets = new WeakMap<Element, string>();
+
+  function isCleanupScope(element: Element): boolean {
+    return Boolean(element.closest(ASSISTANT_SELECTOR) || element.closest(PREVIEW_SELECTOR)) &&
+      !element.closest(EDITABLE_SELECTOR) && !element.closest(USER_SELECTOR);
+  }
 
   function cleanAnchor(anchor: Element): void {
-    if (!anchor.closest(ASSISTANT_SELECTOR) || anchor.closest(EDITABLE_SELECTOR)) {
+    if (!isCleanupScope(anchor)) {
       return;
     }
     const href = anchor.getAttribute("href");
@@ -71,7 +80,41 @@ export function initChatGptLinkCleanup(document: Document, hostname: string): ()
     }
     const cleaned = cleanChatGptLink(href);
     if (cleaned !== href) {
+      cleanedTargets.set(anchor, cleaned);
       anchor.setAttribute("href", cleaned);
+    }
+  }
+
+  // ChatGPT's delegated handlers can navigate using an original URL retained in
+  // component state. Keep the browser's native link action (including modifiers,
+  // target, middle-click, and keyboard activation), but skip those page handlers.
+  function handleActivation(event: Event): void {
+    const target = event.target as Element | null;
+    const anchor = target?.closest?.("a[href]");
+    if (!anchor || !isCleanupScope(anchor)) {
+      return;
+    }
+    cleanAnchor(anchor);
+    if (cleanedTargets.has(anchor) && cleanedTargets.get(anchor) === anchor.getAttribute("href")) {
+      event.stopImmediatePropagation();
+    }
+  }
+
+  function cleanPreviewText(root: Element): void {
+    if (root.matches("script, style") || root.closest(EDITABLE_SELECTOR) || root.closest(USER_SELECTOR)) {
+      return;
+    }
+    for (const child of root.childNodes) {
+      if (child.nodeType === 1) {
+        cleanPreviewText(child as Element);
+      } else if (child.nodeType === 3 && root.closest(PREVIEW_SELECTOR)) {
+        const text = child.nodeValue || "";
+        const trimmed = text.trim();
+        const cleaned = cleanChatGptLink(trimmed);
+        if (cleaned !== trimmed) {
+          child.nodeValue = text.replace(trimmed, cleaned);
+        }
+      }
     }
   }
 
@@ -82,16 +125,29 @@ export function initChatGptLinkCleanup(document: Document, hostname: string): ()
     for (const anchor of root.querySelectorAll("a[href]")) {
       cleanAnchor(anchor);
     }
+    if (root.closest(PREVIEW_SELECTOR)) {
+      cleanPreviewText(root);
+    } else {
+      for (const preview of root.querySelectorAll(PREVIEW_SELECTOR)) {
+        cleanPreviewText(preview);
+      }
+    }
   }
 
   const observer = new Observer((records) => {
     for (const record of records) {
       if (record.type === "attributes") {
         pending.add(record.target as Element);
+      } else if (record.type === "characterData") {
+        if (record.target.parentElement?.closest(PREVIEW_SELECTOR)) {
+          pending.add(record.target.parentElement);
+        }
       } else {
         for (const node of record.addedNodes) {
           if (node.nodeType === 1) {
             pending.add(node as Element);
+          } else if (node.parentElement?.closest(PREVIEW_SELECTOR)) {
+            pending.add(node.parentElement);
           }
         }
       }
@@ -116,6 +172,8 @@ export function initChatGptLinkCleanup(document: Document, hostname: string): ()
   const stop = () => {
     active = false;
     observer.disconnect();
+    document.defaultView?.removeEventListener("click", handleActivation, true);
+    document.defaultView?.removeEventListener("auxclick", handleActivation, true);
     pending.clear();
     controllers.delete(document);
   };
@@ -123,9 +181,12 @@ export function initChatGptLinkCleanup(document: Document, hostname: string): ()
   observer.observe(document.documentElement, {
     subtree: true,
     childList: true,
+    characterData: true,
     attributes: true,
     attributeFilter: ["href"]
   });
+  document.defaultView?.addEventListener("click", handleActivation, true);
+  document.defaultView?.addEventListener("auxclick", handleActivation, true);
   scan(document.documentElement);
   return stop;
 }

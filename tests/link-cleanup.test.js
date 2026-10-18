@@ -87,7 +87,9 @@ function fixture() {
   const root = new Element("html");
   root.connected = true;
   const message = root.append(new Element("div", { "data-markdown-text-style": "assistant-message" }));
-  const document = { documentElement: root, defaultView: { MutationObserver: Observer } };
+  const document = { documentElement: root, defaultView: {
+    MutationObserver: Observer, addEventListener() {}, removeEventListener() {}
+  } };
   return { document, root, message, observers };
 }
 
@@ -157,4 +159,124 @@ test("does not initialize on other sites or similarly named hosts", () => {
     assert.equal(observers.length, 0);
     assert.equal(anchor.writes, 0);
   }
+});
+
+const { JSDOM } = require("jsdom");
+const dirtyUrl = "https://aegisub.org/?utm_source=chatgpt.com";
+const settleMutations = () => new Promise((resolve) => setImmediate(resolve));
+
+function browserFixture(t) {
+  // The presentation button around the anchor matches Windows字幕制作软件.html.
+  // The original URL is reintroduced to model the page's retained component state.
+  const dom = new JSDOM(`<!doctype html><div data-markdown-text-style="assistant-message">
+    <span role="presentation" type="button" aria-haspopup="dialog" aria-expanded="false" data-state="closed">
+      <a href="${dirtyUrl}" target="_blank" rel="noopener noreferrer"><span>官方网站</span></a>
+    </span></div>`, { url: "https://chatgpt.com/" });
+  const { document } = dom.window;
+  t.after(() => dom.window.close());
+  const stop = initChatGptLinkCleanup(document, "chatgpt.com");
+  t.after(stop);
+  return { window: dom.window, document, stop, anchor: document.querySelector("a") };
+}
+
+test("activation bypasses stale page navigation but preserves native defaults and modifiers", (t) => {
+  const { window, document, anchor } = browserFixture(t);
+  const captured = [];
+  document.addEventListener("click", () => captured.push(dirtyUrl), true);
+  document.addEventListener("auxclick", () => captured.push(dirtyUrl));
+  anchor.parentElement.addEventListener("click", () => captured.push(dirtyUrl));
+  for (const options of [
+    {}, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true },
+    { detail: 0 }, { type: "auxclick", button: 1 }
+  ]) {
+    const { type = "click", ...init } = options;
+    const event = new window.MouseEvent(type, { bubbles: true, cancelable: true, ...init });
+    anchor.querySelector("span").dispatchEvent(event);
+    assert.equal(event.defaultPrevented, false, "native navigation must remain available");
+    assert.equal(anchor.getAttribute("href"), "https://aegisub.org");
+    assert.equal(anchor.target, "_blank");
+  }
+  assert.deepEqual(captured, [], "page handlers must not open the retained dirty URL");
+  // If React restores the dirty href immediately before activation, clean it
+  // synchronously rather than waiting for the MutationObserver microtask.
+  anchor.setAttribute("href", dirtyUrl);
+  anchor.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+  assert.equal(anchor.getAttribute("href"), "https://aegisub.org");
+  assert.deepEqual(captured, []);
+});
+
+test("ordinary links keep page handlers and stopping cleanup removes activation listeners", (t) => {
+  const { window, document, anchor, stop } = browserFixture(t);
+  let clicks = 0;
+  document.addEventListener("click", () => clicks++);
+  const ordinary = document.createElement("a");
+  ordinary.href = "https://example.org/?utm_source=other";
+  anchor.parentElement.append(ordinary);
+  ordinary.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  assert.equal(clicks, 1);
+  anchor.href = "https://example.org/changed";
+  anchor.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  assert.equal(clicks, 2, "an unrelated new href is no longer intercepted");
+  anchor.href = dirtyUrl;
+  stop();
+  anchor.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  assert.equal(clicks, 3);
+  assert.equal(anchor.getAttribute("href"), dirtyUrl);
+});
+
+test("portal previews clean targets and visible URL text on insertion and subsequent updates", async (t) => {
+  const { window, document } = browserFixture(t);
+  const portal = document.createElement("div");
+  portal.setAttribute("data-radix-popper-content-wrapper", "");
+  portal.innerHTML = `<div role="dialog"><a href="${dirtyUrl}">Aegisub</a>
+    <span class="url"> ${dirtyUrl} </span><p>网站介绍</p></div>`;
+  document.body.append(portal);
+  await settleMutations();
+  assert.equal(portal.querySelector("a").getAttribute("href"), "https://aegisub.org");
+  assert.equal(portal.querySelector("a").textContent, "Aegisub");
+  assert.equal(portal.querySelector(".url").textContent, " https://aegisub.org ");
+  assert.equal(portal.querySelector("p").textContent, "网站介绍");
+  const address = portal.querySelector(".url");
+  address.firstChild.nodeValue = "https://example.org/doc?q=1&utm_source=chatgpt.com#part";
+  portal.querySelector("a").href = dirtyUrl;
+  await settleMutations();
+  assert.equal(address.textContent, "https://example.org/doc?q=1#part");
+  assert.equal(portal.querySelector("a").getAttribute("href"), "https://aegisub.org");
+  address.textContent = dirtyUrl;
+  await settleMutations();
+  assert.equal(address.textContent, "https://aegisub.org");
+  let pageClicked = false;
+  document.addEventListener("click", () => { pageClicked = true; });
+  const event = new window.MouseEvent("click", { bubbles: true, cancelable: true });
+  portal.querySelector("a").dispatchEvent(event);
+  assert.equal(pageClicked, false);
+  assert.equal(event.defaultPrevented, false);
+});
+
+test("preview cleanup leaves user content, editors, scripts, and unrelated page content alone", async (t) => {
+  const { window, document } = browserFixture(t);
+  for (const attributes of ['data-message-author-role="user"', 'contenteditable="true"', '']) {
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = `<div ${attributes}><a href="${dirtyUrl}">${dirtyUrl}</a></div>`;
+    document.body.append(wrapper);
+    await settleMutations();
+    assert.equal(wrapper.querySelector("a").getAttribute("href"), dirtyUrl);
+    assert.equal(wrapper.querySelector("a").textContent, dirtyUrl);
+  }
+  const preview = document.createElement("div");
+  preview.setAttribute("role", "tooltip");
+  preview.innerHTML = `<div contenteditable="true"><a href="${dirtyUrl}">${dirtyUrl}</a></div>
+    <div data-message-author-role="user"><a href="${dirtyUrl}">${dirtyUrl}</a></div>
+    <script>${dirtyUrl}</script><span>${dirtyUrl}</span>`;
+  document.body.append(preview);
+  await settleMutations();
+  assert.equal(preview.querySelector("a").getAttribute("href"), dirtyUrl);
+  assert.equal(preview.querySelector('[data-message-author-role="user"] a').getAttribute("href"), dirtyUrl);
+  assert.equal(preview.querySelector('[data-message-author-role="user"]').textContent, dirtyUrl);
+  assert.equal(preview.querySelector("script").textContent, dirtyUrl);
+  assert.equal(preview.querySelector("span").textContent, "https://aegisub.org");
+  let clicks = 0;
+  document.addEventListener("click", () => clicks++);
+  preview.querySelector("a").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  assert.equal(clicks, 1);
 });

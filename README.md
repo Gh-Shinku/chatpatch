@@ -8,8 +8,8 @@ Small improvements for a better web chatbot experience.
   and MediaWiki math on supported pages. Use selection, hover, or context-menu
   copying, or copy a ChatGPT response with its formulas preserved.
 - Automatically clean ChatGPT source tracking from links in assistant responses,
-  including newly streamed content. Other parameters, paths, fragments, and
-  link text are preserved.
+  including newly streamed content and hover preview cards. Other parameters,
+  paths, fragments, and descriptive link text are preserved.
 
 Link cleanup removes `utm_source=chatgpt.com` and
 `utm_source=chat.openai.com` (source values are case-insensitive).
@@ -17,6 +17,9 @@ For example, `https://aegisub.org/?utm_source=chatgpt.com` becomes
 `https://aegisub.org`. Clicking, copying a link address, and copying a response
 with TeX use the cleaned link target. Cleanup is enabled by default on
 `chatgpt.com` and `chat.openai.com` and runs independently of formula copying.
+Cleaned links use the browser's native navigation, preserving new-tab and
+modifier-key behavior instead of letting page click handlers reopen a tracked
+address. Hover cards also have their displayed URL text cleaned as they appear.
 
 ## Preview
 
