@@ -112,7 +112,7 @@ test("initial scan cleans current and legacy assistant links, preserving labels 
   assert.equal(current.textContent, "Aegisub");
   assert.equal(user.writes, 0);
   assert.equal(editable.writes, 0);
-  assert.deepEqual(observers[0].options.attributeFilter, ["href"]);
+  assert.deepEqual(observers[0].options.attributeFilter, ["href", "title"]);
   assert.equal(initChatGptLinkCleanup(document, "chatgpt.com"), stop);
   assert.equal(observers.length, 1);
 
@@ -162,6 +162,9 @@ test("does not initialize on other sites or similarly named hosts", () => {
 });
 
 const { JSDOM } = require("jsdom");
+const { readFileSync } = require("node:fs");
+const path = require("node:path");
+const hoverCardHtml = readFileSync(path.join(__dirname, "fixtures/chatgpt-hover-card.html"), "utf8");
 const dirtyUrl = "https://aegisub.org/?utm_source=chatgpt.com";
 const settleMutations = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -251,6 +254,58 @@ test("portal previews clean targets and visible URL text on insertion and subseq
   portal.querySelector("a").dispatchEvent(event);
   assert.equal(pageClicked, false);
   assert.equal(event.defaultPrevented, false);
+});
+
+test("real hover card cleans a tracked title even when href is already clean", async (t) => {
+  const { window, document } = browserFixture(t);
+  const container = document.createElement("div");
+  container.innerHTML = hoverCardHtml;
+  const anchor = container.querySelector("a");
+  const href = "https://github.com/SubtitleEdit/subtitleedit/releases";
+  assert.equal(anchor.getAttribute("href"), href);
+  assert.equal(anchor.getAttribute("title"), `${href}?utm_source=chatgpt.com`);
+  const originalLabel = anchor.textContent;
+  const originalFavicon = container.querySelector("img").getAttribute("src");
+  document.body.append(container);
+  await settleMutations();
+  assert.equal(anchor.getAttribute("title"), href);
+  assert.equal(anchor.getAttribute("href"), href);
+  assert.equal(anchor.textContent, originalLabel, "keep the site's truncated label");
+  assert.equal(container.querySelector("img").getAttribute("src"), originalFavicon);
+  let pageClicked = false;
+  document.addEventListener("click", () => { pageClicked = true; });
+  anchor.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+  assert.equal(pageClicked, false, "a title-only cleanup also protects native navigation");
+
+  // React can update only the tooltip attribute while leaving href unchanged.
+  anchor.setAttribute("title", `${href}?utm_source=chatgpt.com&tab=latest#downloads`);
+  await settleMutations();
+  assert.equal(anchor.getAttribute("title"), `${href}?tab=latest#downloads`);
+  anchor.setAttribute("title", "Download the latest release");
+  await settleMutations();
+  assert.equal(anchor.getAttribute("title"), "Download the latest release");
+  anchor.setAttribute("title", `${href}?utm_source=other`);
+  await settleMutations();
+  assert.equal(anchor.getAttribute("title"), `${href}?utm_source=other`);
+});
+
+test("initial scan cleans hover card titles and excludes user/editable titles", (t) => {
+  const dom = new JSDOM(`<!doctype html>${hoverCardHtml}`, { url: "https://chatgpt.com/" });
+  const { document } = dom.window;
+  t.after(() => dom.window.close());
+  const card = document.querySelector('[role="dialog"]');
+  for (const attributes of ['contenteditable="true"', 'data-message-author-role="user"']) {
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = `<div ${attributes}><a href="${dirtyUrl}" title="${dirtyUrl}">Link</a></div>`;
+    card.append(wrapper);
+  }
+  t.after(initChatGptLinkCleanup(document, "chatgpt.com"));
+  assert.equal(document.querySelector("a").getAttribute("title"),
+    "https://github.com/SubtitleEdit/subtitleedit/releases");
+  for (const anchor of card.querySelectorAll('[contenteditable] a, [data-message-author-role="user"] a')) {
+    assert.equal(anchor.getAttribute("title"), dirtyUrl);
+    assert.equal(anchor.getAttribute("href"), dirtyUrl);
+  }
 });
 
 test("preview cleanup leaves user content, editors, scripts, and unrelated page content alone", async (t) => {

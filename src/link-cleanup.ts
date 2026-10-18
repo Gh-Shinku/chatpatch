@@ -83,6 +83,18 @@ export function initChatGptLinkCleanup(document: Document, hostname: string): ()
       cleanedTargets.set(anchor, cleaned);
       anchor.setAttribute("href", cleaned);
     }
+    const title = anchor.getAttribute("title");
+    if (title !== null) {
+      const cleanedTitle = cleanChatGptLink(title);
+      if (cleanedTitle !== title) {
+        anchor.setAttribute("title", cleanedTitle);
+        // Preview cards can already have a clean href while their title still
+        // exposes the original address retained by the page's click handler.
+        if (cleanedTitle === cleaned) {
+          cleanedTargets.set(anchor, cleaned);
+        }
+      }
+    }
   }
 
   // ChatGPT's delegated handlers can navigate using an original URL retained in
@@ -183,7 +195,7 @@ export function initChatGptLinkCleanup(document: Document, hostname: string): ()
     childList: true,
     characterData: true,
     attributes: true,
-    attributeFilter: ["href"]
+    attributeFilter: ["href", "title"]
   });
   document.defaultView?.addEventListener("click", handleActivation, true);
   document.defaultView?.addEventListener("auxclick", handleActivation, true);

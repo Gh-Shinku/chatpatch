@@ -19,7 +19,8 @@ with TeX use the cleaned link target. Cleanup is enabled by default on
 `chatgpt.com` and `chat.openai.com` and runs independently of formula copying.
 Cleaned links use the browser's native navigation, preserving new-tab and
 modifier-key behavior instead of letting page click handlers reopen a tracked
-address. Hover cards also have their displayed URL text cleaned as they appear.
+address. Hover cards also have their displayed URL text and link titles cleaned
+as they appear or update.
 
 ## Preview
 
