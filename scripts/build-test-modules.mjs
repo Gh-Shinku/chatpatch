@@ -11,6 +11,7 @@ await bundleNode("src/shared/settings.ts", "shared/settings.cjs");
 await bundleNode("src/extractor.ts", "extractor.cjs");
 await bundleNode("src/selection.ts", "selection.cjs");
 await bundleNode("src/chatgpt.ts", "chatgpt.cjs");
+await bundleNode("src/link-cleanup.ts", "link-cleanup.cjs");
 await bundleBrowser("src/content/clipboard.ts", "content/clipboard.js");
 await bundleBrowser("src/popup.ts", "popup.js");
 

@@ -48,6 +48,15 @@ The package is written to `release/copytex-v<version>.zip`.
 
 ## Supported Sites
 
+On ChatGPT (`chatgpt.com` and `chat.openai.com`), the extension also automatically
+cleans links in assistant responses, including newly streamed content. It removes
+`utm_source=chatgpt.com` and `utm_source=chat.openai.com` (source values are
+case-insensitive), while preserving other query parameters, paths, and fragments.
+For example, `https://aegisub.org/?utm_source=chatgpt.com` becomes
+`https://aegisub.org`. Link text is unchanged. Clicking, copying a link address,
+and copying a response with TeX use the cleaned link target. This feature runs
+independently of formula extraction and copying and is enabled by default.
+
 - `https://chatgpt.com/`
 - `https://chat.deepseek.com/`
 - `https://www.zhihu.com/`

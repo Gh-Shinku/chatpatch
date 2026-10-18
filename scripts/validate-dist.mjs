@@ -37,6 +37,7 @@ if (manifest.manifest_version !== 3) {
 await assertBuiltFromTypeScript("background.js", ["src/background.ts"]);
 await assertBuiltFromTypeScript("content.js", [
   "src/chatgpt.ts",
+  "src/link-cleanup.ts",
   "src/content.ts",
   "src/extractor.ts",
   "src/selection.ts"

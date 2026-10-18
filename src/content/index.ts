@@ -7,3 +7,6 @@ import "./clipboard";
 import "./toast";
 import "./floating-button";
 import "../content";
+import { initChatGptLinkCleanup } from "../link-cleanup";
+
+initChatGptLinkCleanup(document, location.hostname);
