@@ -7,7 +7,7 @@ const root = process.cwd();
 const distDir = path.join(root, "dist");
 const releaseDir = path.join(root, "release");
 const manifest = JSON.parse(await readFile(path.join(distDir, "manifest.json"), "utf8"));
-const packagePath = path.join(releaseDir, `copytex-v${manifest.version}.zip`);
+const packagePath = path.join(releaseDir, `chatpatch-v${manifest.version}.zip`);
 
 await mkdir(releaseDir, { recursive: true });
 await rm(packagePath, { force: true });

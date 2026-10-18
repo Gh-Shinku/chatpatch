@@ -1,14 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "CopyTeX",
+  "name": "ChatPatch",
   "version": "0.1.3",
-  "description": "Copy KaTeX and MathJax-rendered formulas as Markdown or LaTeX in supported web pages.",
+  "description": "Small improvements for a better web chatbot experience.",
   "permissions": ["contextMenus", "clipboardWrite", "storage"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "CopyTeX",
+    "default_title": "ChatPatch",
     "default_popup": "popup.html"
   },
   "content_scripts": [

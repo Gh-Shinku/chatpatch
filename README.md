@@ -1,20 +1,36 @@
-# CopyTeX
+# ChatPatch
 
-An extension that copies KaTeX, MathJax, and MediaWiki-rendered formulas as Markdown or LaTeX on supported web pages.
+Small improvements for a better web chatbot experience.
+
+## Features
+
+- Copy rendered formulas as Markdown or LaTeX, with support for KaTeX, MathJax,
+  and MediaWiki math on supported pages. Use selection, hover, or context-menu
+  copying, or copy a ChatGPT response with its formulas preserved.
+- Automatically clean ChatGPT source tracking from links in assistant responses,
+  including newly streamed content. Other parameters, paths, fragments, and
+  link text are preserved.
+
+Link cleanup removes `utm_source=chatgpt.com` and
+`utm_source=chat.openai.com` (source values are case-insensitive).
+For example, `https://aegisub.org/?utm_source=chatgpt.com` becomes
+`https://aegisub.org`. Clicking, copying a link address, and copying a response
+with TeX use the cleaned link target. Cleanup is enabled by default on
+`chatgpt.com` and `chat.openai.com` and runs independently of formula copying.
 
 ## Preview
 
 <p align="center">
-  <img src="assets/hover.png" alt="CopyTeX hover copy button" width="760">
+  <img src="assets/hover.png" alt="ChatPatch formula hover copy button" width="760">
 </p>
 
 <p align="center"><sub>Hover copy control on a rendered formula.</sub></p>
 
 <p align="center">
-  <img src="assets/popup.png" alt="CopyTeX extension popup" width="320">
+  <img src="assets/popup.png" alt="Formula output format settings" width="320">
 </p>
 
-<p align="center"><sub>Extension popup for output format settings.</sub></p>
+<p align="center"><sub>Output format settings, shown in an earlier version.</sub></p>
 
 ## Installation
 
@@ -44,20 +60,12 @@ To create a distributable zip, run:
 npm run package
 ```
 
-The package is written to `release/copytex-v<version>.zip`.
+The package is written to `release/chatpatch-v<version>.zip`.
 
 ## Supported Sites
 
-On ChatGPT (`chatgpt.com` and `chat.openai.com`), the extension also automatically
-cleans links in assistant responses, including newly streamed content. It removes
-`utm_source=chatgpt.com` and `utm_source=chat.openai.com` (source values are
-case-insensitive), while preserving other query parameters, paths, and fragments.
-For example, `https://aegisub.org/?utm_source=chatgpt.com` becomes
-`https://aegisub.org`. Link text is unchanged. Clicking, copying a link address,
-and copying a response with TeX use the cleaned link target. This feature runs
-independently of formula extraction and copying and is enabled by default.
-
 - `https://chatgpt.com/`
+- `https://chat.openai.com/`
 - `https://chat.deepseek.com/`
 - `https://www.zhihu.com/`
 - `https://zhuanlan.zhihu.com/`

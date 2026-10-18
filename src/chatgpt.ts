@@ -171,8 +171,8 @@ function createResponseCopyButton(
   button.removeAttribute("data-state");
   button.setAttribute("type", "button");
   button.setAttribute(COPYTEX_RESPONSE_COPY_ATTRIBUTE, "true");
-  button.setAttribute("aria-label", "Copy message with CopyTeX");
-  button.setAttribute("title", "Copy message with CopyTeX");
+  button.setAttribute("aria-label", "Copy message with ChatPatch");
+  button.setAttribute("title", "Copy message with ChatPatch");
   button.innerHTML =
     '<span class="copytex-response-copy-label flex items-center justify-center touch:w-10 h-8 w-8">TeX</span>';
   matchNativeButtonSize(button, nativeButton);

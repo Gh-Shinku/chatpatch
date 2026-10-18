@@ -223,8 +223,8 @@ function initCopyTeXContentScript(): void {
     turn: Element | null
   ): Promise<CopyResult> {
     if (!turn || !chatGptTools) {
-      showToast("CopyTeX response copy is unavailable", true);
-      return { ok: false, error: "CopyTeX response copy is unavailable" };
+      showToast("ChatPatch response copy is unavailable", true);
+      return { ok: false, error: "ChatPatch response copy is unavailable" };
     }
 
     try {

@@ -445,7 +445,7 @@ test("injects response copy buttons into assistant turns only", () => {
   assert.equal(userActions.length, 1);
   assert.equal(assistantActions[1].getAttribute(COPYTEX_RESPONSE_COPY_ATTRIBUTE), "true");
   assert.equal(assistantActions[1].getAttribute("data-testid"), "");
-  assert.equal(assistantActions[1].getAttribute("aria-label"), "Copy message with CopyTeX");
+  assert.equal(assistantActions[1].getAttribute("aria-label"), "Copy message with ChatPatch");
   assert.match(assistantActions[1].innerHTML, /TeX/);
 });
 
@@ -539,7 +539,7 @@ test("injects response copy buttons next to the latest ChatGPT native copy butto
   assert.equal(copyTeXButton.parentElement, nativeCopyButton.parentElement);
   assert.equal(copyTeXButton.parentElement.children[0], nativeCopyButton);
   assert.equal(copyTeXButton.getAttribute("data-testid"), "");
-  assert.equal(copyTeXButton.getAttribute("aria-label"), "Copy message with CopyTeX");
+  assert.equal(copyTeXButton.getAttribute("aria-label"), "Copy message with ChatPatch");
   assert.match(copyTeXButton.innerHTML, /TeX/);
 
   const userCopyButton = buttons.find(
